@@ -20,15 +20,19 @@ int quit = 0;
 
 static int getLine (char *prmpt, char *buff, size_t sz);
 
-int countWhiteSpace(char *input);
+int countWhiteSpace(char input[100]);
 
-void parseCommand(char *input);
+void parseCommand(char input[100]);
 
-void normalCommand(char *input);
+void outputCommand(char *input[], int length);
 
-void singleCommand(char *input, int length);
+void singleCommand(char *input[], int length);
+
+void backGroundCommand(char *input[], int length);
 
 int checkQuit(char *input);
+
+void removeStringTrailingNewline(char *str);
 
 
 
@@ -67,7 +71,7 @@ int main (void) {
 }
 
 // This will tell you how many whitespace characters there are.
-int countWhiteSpace(char *input){
+int countWhiteSpace(char input[100]){
 	int len = strlen(input);
 	int i, count = 0;
 	for(i=0; i<len; i++){
@@ -78,20 +82,43 @@ int countWhiteSpace(char *input){
 	return count;
 }
 
-void parseCommand(char *input){
+void parseCommand(char input[100]){
+	int i = 0;
 	// find how much white space there is
 	int whiteSpaces = countWhiteSpace(input);
 	// make char* array of whiteSpaces+1 because that is how many words there are
-
+	char *tokenizedString[whiteSpaces + 1];
+	
 	// tokenize input
+	char *temp = strtok(input, " ");
+	while(temp != NULL){
+		tokenizedString[i++] = temp;
+		temp = strtok(NULL, " ");	
+	}
 	
 	// check the tokenized input for ; & | >
-
-	// call appropriate method depending on part above
-	
+	for (i = 0; i < (whiteSpaces + 1); i++){
+		
+		if(tokenizedString[i][0] == ';'){
+			printf("semicolon\n");
+			return;
+		} else if(tokenizedString[i][0] == '&'){
+			backGroundCommand(tokenizedString, (whiteSpaces+1));
+			return;
+		}else if(tokenizedString[i][0] == '|'){
+			printf("pipe\n");
+			return;
+		}else if(tokenizedString[i][0] == '>'){
+			outputCommand(tokenizedString, (whiteSpaces+1));
+			return;
+		}
+	} 
+        
+	// Call basic exec
+	singleCommand(tokenizedString, (whiteSpaces+1));
 }
 
-void singleCommand(char *input, int length){
+void singleCommand(char *input[], int length){
 	int rc = fork();
     if (rc < 0) {
         // fork failed; exit
@@ -99,11 +126,13 @@ void singleCommand(char *input, int length){
         exit(1);
     }
     else if (rc == 0) {
-		
-        char *myargs[3];
-        myargs[0] = strdup("ls");   // program: "wc" (word count)
-        myargs[1] = strdup("-al"); // argument: file to count
-        myargs[2] = NULL;           // marks end of array
+		int i = 0;
+        char *myargs[length+1];
+
+		for(i = 0; i<length; i++){
+			myargs[i] = strdup(input[i]);
+		}
+        myargs[length -1] = NULL;           // marks end of array
         execvp(myargs[0], myargs);  // runs word count
     }
     else {
@@ -112,8 +141,32 @@ void singleCommand(char *input, int length){
     }
 }
 
-void normalCommand(char *input){
-	printf("call normalCommand\n");
+// This will run an exec in the background
+void backGroundCommand(char *input[], int length){
+	int rc = fork();
+    if (rc < 0) {
+        // fork failed; exit
+        fprintf(stderr, "fork failed\n");
+        exit(1);
+    }
+    else if (rc == 0) {
+		int i = 0;
+        char *myargs[length+1];
+
+		for(i = 0; i<length; i++){
+			myargs[i] = strdup(input[i]);
+		}
+        myargs[length -1] = NULL;           // marks end of array
+        execvp(myargs[0], myargs);  // runs word count
+    }
+    else {
+        
+    }
+}
+
+void outputCommand(char *input[], int length){
+	
+	removeStringTrailingNewline(input[length-1]);
 	int rc = fork();
     if (rc < 0) {
         // fork failed; exit
@@ -122,13 +175,13 @@ void normalCommand(char *input){
     }
     else if (rc == 0) {
 		// child: redirect standard output to a file
+		
 		close(STDOUT_FILENO);
-		open("./p4.output", O_CREAT|O_WRONLY|O_TRUNC, S_IRWXU);
-		printf("made it");
-		// now exec "wc"...
-        char *myargs[3];
-        myargs[0] = strdup("ls");   // program: "wc" (word count)
-        myargs[1] = strdup("-al"); // argument: file to count
+		open(input[length-1], O_CREAT|O_WRONLY|O_TRUNC, S_IRWXU);
+		
+		char *myargs[3];
+        myargs[0] = strdup(input[0]);   // program: "wc" (word count)
+        myargs[1] = strdup(input[1]); // argument: file to count
         myargs[2] = NULL;           // marks end of array
         execvp(myargs[0], myargs);  // runs word count
     }
@@ -150,6 +203,14 @@ int checkQuit(char *input){
 	}
 	
 	return 0;
+}
+
+void removeStringTrailingNewline(char *str) {
+  if (str == NULL)
+    return;
+  int length = strlen(str);
+  if (str[length-1] == '\n')
+    str[length-1]  = '\0';
 }
 
 
