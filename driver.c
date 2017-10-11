@@ -1,7 +1,6 @@
 // Matthew Likwarz
 // Project 1
 // CS 421
-// String reading example found here https://stackoverflow.com/questions/4023895/how-to-read-string-entered-by-user-in-c
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -12,21 +11,19 @@
 
 //Prototyped methods
 
-#define OK       0
-#define NO_INPUT 1
-#define TOO_LONG 2
-
 int quit = 0;
 
-static int getLine (char *prmpt, char *buff, size_t sz);
+static int getInput(char *prompt, char *buffer, size_t size);
 
 int countWhiteSpace(char input[100]);
 
 void parseCommand(char input[100]);
 
-void outputCommand(char *input[], int length);
+void outputCommand(char *input[], int length, int numCommands);
 
 void singleCommand(char *input[], int length);
+
+void pipeCommand(char *input[], int length);
 
 void sequentialCommand(char *input[], int length);
 
@@ -36,23 +33,22 @@ int checkQuit(char *input);
 
 void removeStringTrailingNewline(char *str);
 
-
-
+// This is the main method that runs the program
 int main (void) {
-    int rc;
+    int validInput;
     char buff[100];
 
 	while(quit == 0)
 	{
-		rc = getLine ("Enter command> ", buff, sizeof(buff));
-		if (rc == NO_INPUT) {
-		    // Extra NL since my system doesn't output that on EOF.
+		memset(buff, 0, sizeof buff);
+		validInput = getInput("Enter command> ", buff, sizeof(buff));
+		if (validInput == 1) {
 		    printf ("\nNo input\n");
 		    break;
 		}
 
-		if (rc == TOO_LONG) {
-		    printf ("Input too long [%s]\n", buff);
+		if (validInput == 2) {
+		    printf ("Input too long only char[100]\n");
 		    break;
 		}
 		
@@ -98,20 +94,18 @@ void parseCommand(char input[100]){
 	// check the tokenized input for ; & | >
 	for (i = 0; i < (whiteSpaces + 1); i++){
 		
+		// first check if special command
 		if(tokenizedString[i][0] == ';'){
-			printf("SemiColon\n");
 			sequentialCommand(tokenizedString, (whiteSpaces+1));
 			return;
 		} else if(tokenizedString[i][0] == '&'){
-			printf("Ampersand\n");
 			backGroundCommand(tokenizedString, (whiteSpaces+1));
 			return;
 		}else if(tokenizedString[i][0] == '|'){
-			printf("pipe\n");
+			pipeCommand(tokenizedString, (whiteSpaces+1));
 			return;
 		}else if(tokenizedString[i][0] == '>'){
-			printf("Carrot\n");
-			outputCommand(tokenizedString, (whiteSpaces+1));
+			outputCommand(tokenizedString, (whiteSpaces+1), i);
 			return;
 		}
 	} 
@@ -120,33 +114,97 @@ void parseCommand(char input[100]){
 	singleCommand(tokenizedString, (whiteSpaces+1));
 }
 
+// This will run a single command that doesn't have ; > | & in it
 void singleCommand(char *input[], int length){
 
 	int rc = fork();
     if (rc < 0) {
-        // fork failed; exit
         fprintf(stderr, "fork failed\n");
         exit(1);
     }
     else if (rc == 0) {
-		char *myargs[3];
-		if(length == 1){
-		    myargs[0] = strdup(input[0]);
-		    myargs[1] = NULL;
-		}else{
-		    myargs[0] = strdup(input[0]);
-		    myargs[1] = strdup(input[1]);
-		    myargs[2] = NULL;
-		}
+		// child
+		int i = 0;
+        char *myargs[length+1];
 
+		for(i = 0; i<length; i++){
+			myargs[i] = strdup(input[i]);
+		}
+        myargs[length] = NULL;
         execvp(myargs[0], myargs);
     }
     else {
-        // parent goes down this path (original process)
-        int wc = wait(NULL);
+        // parent
+        wait(NULL);
     }
 }
 
+// This will run a piped input linux command
+void pipeCommand(char *input[], int length){
+	int firstLength = 0;
+	int secondLength = 0;
+	int i;
+	int afterSemiColon = 0; 
+	for(i = 0; i<length; i++){
+		if(input[i][0] == '|'){
+			afterSemiColon = 1;
+			continue;
+		}
+		if(afterSemiColon == 0){
+			firstLength++;		
+		}else{
+			secondLength++;
+		}
+	}
+	
+	char *input1[firstLength + 1];
+	char *input2[secondLength + 1];
+
+	for(i=0; i<firstLength; i++){
+		input1[i] = input[i];
+	}
+	input1[firstLength] = NULL;
+
+	for(i=0; i<secondLength; i++){
+		input2[i] = input[i + firstLength + 1];
+	}
+	input2[secondLength] = NULL;
+	
+	int rc = fork();
+    if (rc < 0) {
+        fprintf(stderr, "fork failed\n");
+        exit(1);
+    }
+    else if (rc == 0) {
+		int fd[2];
+		//make the pipe
+		pipe(fd);
+		int pid = fork();
+		if (pid < 0) {
+		    fprintf(stderr, "fork failed\n");
+		    exit(1);
+		}
+		else if (pid == 0) {
+			// close this end of the pipe because the child doesn't need it
+			close(fd[1]);
+			dup2(fd[0], 0);
+			execvp(input2[0], input2);
+			close(fd[0]);
+		}
+		else {
+			// close this end of the pipe because the parent doesn't need it
+			close(fd[0]);
+			dup2(fd[1], 1);
+			execvp(input1[0], input1);
+			close(fd[1]);
+		}
+    }
+    else {
+       wait(NULL);
+    }
+}
+
+// This will run two commands sequentially
 void sequentialCommand(char *input[], int length){
 	int firstLength = 0;
 	int secondLength = 0;
@@ -175,20 +233,19 @@ void sequentialCommand(char *input[], int length){
 		input2[i] = input[i + firstLength + 1];
 	}
 	
-
 	int rc = fork();
     if (rc < 0) {
-        // fork failed; exit
         fprintf(stderr, "fork failed\n");
         exit(1);
     }
     else if (rc == 0) {
+		// child
 		singleCommand(input1, firstLength);
 		singleCommand(input2, secondLength);
     }
     else {
-        // parent goes down this path (original process)
-        int wc = wait(NULL);
+        // parent
+        wait(NULL);
     }
 	
 }
@@ -197,65 +254,49 @@ void sequentialCommand(char *input[], int length){
 void backGroundCommand(char *input[], int length){
 	int rc = fork();
     if (rc < 0) {
-        // fork failed; exit
         fprintf(stderr, "fork failed\n");
         exit(1);
     }
     else if (rc == 0) {
-		char *myargs[3];
-        myargs[0] = strdup(input[0]);   // program: "wc" (word count)
-        myargs[1] = strdup(input[1]); // argument: file to count
-        myargs[2] = NULL;
+		int i = 0;
+        char *myargs[length];
 
-		if(myargs[1][0] == ' '){
-			myargs[1] = NULL;		
+		for(i = 0; i<length; i++){
+			myargs[i] = strdup(input[i]);
 		}
-
-		if(myargs[1][0] == '&'){
-			myargs[1] = NULL;		
-		}
-
-        execvp(myargs[0], myargs);  // runs word count
+        myargs[length -1] = NULL;
+        execvp(myargs[0], myargs);
     }
     else {
-        // no need to wait
+        // no need to wait on child
     }
 }
 
 // This will take in a command and output it to a given file
-void outputCommand(char *input[], int length){
-	
-	removeStringTrailingNewline(input[length-1]);
+void outputCommand(char *input[], int length, int numCommands){
 	int rc = fork();
     if (rc < 0) {
-        // fork failed; exit
         fprintf(stderr, "fork failed\n");
         exit(1);
     }
     else if (rc == 0) {
-		// child: redirect standard output to a file
+		// child
 		
 		close(STDOUT_FILENO);
 		open(input[length-1], O_CREAT|O_WRONLY|O_TRUNC, S_IRWXU);
 		
-		char *myargs[3];
-        myargs[0] = strdup(input[0]);   // program: "wc" (word count)
-        myargs[1] = strdup(input[1]); // argument: file to count
-        myargs[2] = NULL;           // marks end of array
+		int i = 0;
+        char *myargs[numCommands+1];
 
-		if(myargs[1][0] == ' '){
-			myargs[1] = NULL;		
+		for(i = 0; i<numCommands; i++){
+			myargs[i] = strdup(input[i]);
 		}
-
-		if(myargs[1][0] == '>'){
-			myargs[1] = NULL;		
-		}
-		
-        execvp(myargs[0], myargs);  // runs word count
+        myargs[numCommands] = NULL;
+        execvp(myargs[0], myargs);
     }
     else {
-        // parent goes down this path (original process)
-        int wc = wait(NULL);
+        // parent
+        wait(NULL);
     }
 }
 
@@ -269,40 +310,32 @@ int checkQuit(char *input){
 	if(input[0] == 'Q' && input[1] == 'U' && input[2] == 'I' && input[3] == 'T'){
 		return 1;	
 	}
-	
 	return 0;
 }
 
-void removeStringTrailingNewline(char *str) {
-  if (str == NULL)
-    return;
-  int length = strlen(str);
-  if (str[length-1] == '\n')
-    str[length-1]  = '\0';
-}
-
-
-static int getLine (char *prmpt, char *buff, size_t sz) {
+// This method will print out the prompt and send back what the user input
+// with some basic error handling
+static int getInput(char *prompt, char *buffer, size_t size) {
     int ch, extra;
 
     // Get line with buffer overrun protection.
-    if (prmpt != NULL) {
-        printf ("%s", prmpt);
+    if (prompt != NULL) {
+        printf ("%s", prompt);
         fflush (stdout);
     }
-    if (fgets (buff, sz, stdin) == NULL)
-        return NO_INPUT;
+    if (fgets (buffer, size, stdin) == NULL)
+        return 1;
 
     // If it was too long, there'll be no newline. In that case, we flush
     // to end of line so that excess doesn't affect the next call.
-    if (buff[strlen(buff)-1] != '\n') {
+    if (buffer[strlen(buffer)-1] != '\n') {
         extra = 0;
         while (((ch = getchar()) != '\n') && (ch != EOF))
             extra = 1;
-        return (extra == 1) ? TOO_LONG : OK;
+        return (extra == 1) ? 2 : 0;
     }
 
     // Otherwise remove newline and give string back to caller.
-	buff[strlen(buff) -1] = '\0';
-    return OK;
+	buffer[strlen(buffer) -1] = '\0';
+    return 0;
 }
